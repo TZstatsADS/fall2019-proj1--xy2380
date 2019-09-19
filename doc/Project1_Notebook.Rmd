@@ -1,0 +1,155 @@
+---
+title: "Comparison of Song Lyrics by Genres"
+output:
+  html_document:
+    df_print: paged
+---
+
+Do Different genres of songs display specific patterns and express different emotions? In this article, I am going to explore the song lyrics of different genres and investigate if specific genre of song has its own characteristic.
+
+##What words are used the most frequently?
+
+To get an overview of the lyrics used in the songs, first I will count the frequency of the words in general, then check the most frequently used words in each genre, in order to see whether the tendency of word frequency for each genre follows the trend in general.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+# load required packages
+load("/Users/xiyiyan/Documents/GitHub/fall2019-proj1--xy2380/output/processed_lyrics.RData")
+library(wordcloud2)
+library(ggplot2)
+library(sentimentr)
+library(syuzhet)
+library(tidyverse)
+library(d3heatmap)
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#word counts in general
+splitwords<-strsplit(as.character(dt_lyrics$stemmedwords),split=" ")
+words_all<-unlist(splitwords)
+count_words<-table(words_all)
+count_words<-sort(count_words,decreasing = TRUE)
+
+#create wordcloud
+wordcloud2(count_words[1:300],background="dark",color="random-light", shape="cardioid") 
+```
+
+According to the wordcloud, the most frequently words in general include **love, time, youre(you're), baby, ill, day**, etc. 
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+
+#word counts for each genre
+dt_lyrics.sub<-dt_lyrics %>%
+  filter(genre!="Not Available"&genre!="Other")
+
+genres<-levels(factor(dt_lyrics.sub$genre))
+
+genre_wordcount<-function(df,genre){
+  stem_splitwords<-strsplit(as.character(df[df$genre==genre,]$stemmedwords),split=" ")
+  stem_splitwords<-unlist(stem_splitwords)
+  count_words<-table(stem_splitwords)
+  count_words<-sort(count_words,decreasing = TRUE)
+  return(head(count_words,10))
+} 
+
+#create dataframe for 10 most frequent used words for each genre
+word.freq<-NULL
+for (i in 1:length(genres)){
+  word.freq[[i]]<-genre_wordcount(dt_lyrics.sub,genres[i])
+}
+names(word.freq)<-c(genres)
+
+ggplot(data=as.data.frame(word.freq$Metal))+
+  geom_bar(aes(x=stem_splitwords,y=Freq),fill="steelblue3",stat="identity")+
+  ggtitle("10 Most Frequently Used Words in Metal Songs")+
+  xlab("Words")
+
+#love is the most frequntly used word in all genres except for Metal
+
+#calculate the percentage of times "love" appear in 10 most frequently used words in each genre and create barplot
+genre_love.frequency<-rep(NA,length(genres))
+for (i in 1:length(genres)){
+  word.freq<-genre_wordcount(dt_lyrics.sub,genres[i])
+  genre_love.frequency[i]<-word.freq["love"]/sum(word.freq)
+}
+genre_love.frequency<-round(genre_love.frequency,2)
+love.freq.df<-as.data.frame(cbind(genres,genre_love.frequency))
+love.freq.df<-love.freq.df[order(love.freq.df$genre_love.frequency,decreasing=TRUE),]
+
+ggplot(data=love.freq.df)+
+  geom_bar(mapping=aes(x=reorder(genres,as.numeric(genre_love.frequency)),y=genre_love.frequency,fill=genre_love.frequency),stat="identity")+
+  scale_fill_brewer(palette="Blues")+
+  ggtitle("Percentage of 'love' in Top-ten Most Frequently Used Words By Genre")+
+  xlab("Genre")+
+  ylab("Percentage")+
+  coord_flip()
+
+```
+
+If we check individually on each of the genres, the top 3 most frequent words in **Metal** songs are **time, life, and die**, which is unusual and very different form the general trend. 
+
+By looking at the barplot showing the percentage of the word **love** in the most frequent 10 words in each genre, **love** appears in the **Jazz** genre the most, while appears in th **Metal** genre the least.
+
+##Sentiment Analysis 
+
+Next, I want to explore whether there exist differences in the emotions expressed by the songs of different genres. So I conduct sentiment analysis on the lyrics.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#get average sentiment scores for each genre
+sentence<-get_sentences(dt_lyrics.sub$stemmedwords)
+dt_lyrics.sub$sentiment_score<-sentiment(sentence)[,4]
+sentiment_mean.df<-dt_lyrics.sub %>%
+  group_by(genre) %>%
+  summarize(sentiment_mean=mean(unlist(sentiment_score)))
+
+ggplot(sentiment_mean.df)+
+  geom_bar(aes(x=genre,y=sentiment_mean),fill="steelblue3",stat="identity")+
+  ggtitle("Average Sentiment Score by Genre")+
+  xlab("Genre")+
+  ylab("Average Sentiment Score")
+```
+
+By looking at the barplot of average sentiment scores, **Metal** songs have negative and **lowest** score; **Jazz** songs have **highest** postive score.
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#get proportions of different sentiments in lexicon for each genre
+sentiment.words<-function(df,genre){
+  sentiment.df<-get_nrc_sentiment(df[df$genre==genre,]$stemmedwords)
+  return(apply(sentiment.df,2,sum))
+}
+
+sentiment.df<-NULL
+for (i in 1:length(genres)){
+  sentiment<-sentiment.words(dt_lyrics.sub,genres[i])
+  sentiment.df<-rbind(sentiment.df,sentiment)
+}
+rownames(sentiment.df)<-genres
+sentiment_per<-sentiment.df/rowSums(sentiment.df)
+
+```
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+#get heatmaps for the sentiments and genres
+emotion=c("anger","anticipation","disgust","fear","joy","sadness","surprise","trust","negative","positive")
+df.sent<-expand.grid(Genres=genres,Emotion=emotion[1:8])
+df.sent$fill<-as.vector(sentiment_per[,1:8])
+ggplot(data=df.sent,aes(x=Emotion,y=Genres))+
+  geom_tile(aes(fill=df.sent$fill))+
+  scale_fill_gradient(low="white",high="steelblue")+
+  ggtitle("Heatmap of Proportion of First 8 Sentiments by Genre")
+  
+df.sent<-expand.grid(Genres=genres,Emotion=emotion[9:10])
+df.sent$fill<-as.vector(sentiment_per[,9:10])
+ggplot(data=df.sent,aes(x=Emotion,y=Genres))+
+  geom_tile(aes(fill=df.sent$fill))+
+  scale_fill_gradient(low="white",high="steelblue")+
+  ggtitle("Heatmap of Proportion of Postive and Negative Sentiments by Genre")
+
+```
+
+Based on the heatmap of proportions of first eight sentiments based on different genres, in general, the song lyrics show **joy** the **most**, and show **surprise** the **least** among the eight emotions.**joy** is expressed the most in **Jazz** songs, while relatively less in **Metal** songs.**Disgust,fear** and **sadness** have most exposure in the **Metal** genre.
+
+From the second heatmap showing the percentage of positive and negative words, it's clear that **Metal** songs contain the most **negative** words while **Jazz** songs contain the most **positive** words.
+
+
+##Summary
+By doing text analysis on the lyrics, we can conclude that to some extent, different song genres do have different characteristics. The features of some of the genres are more obvious than others. To be more specific, the Metal songs express more negative or depressed emotions than other genres; and the emotion of Jazz singers express are more positive and joyful than others.
